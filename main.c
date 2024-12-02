@@ -8,6 +8,11 @@
 
 #include "include/parser.h"
 
+
+#define YELLOW "\033[1;33m"
+#define END "\033[0m"
+#define BUFSIZE 1024
+
 /*
  * Creates a child process to execute a command via execvp
  * We don't take as a parameter line->command because of the needed use of redirection info
@@ -46,7 +51,7 @@ void execute_command(const tline *line, const int idx) {
 		// if it has a redirect output filename we redirect STDOUT into the fd of the new file
 		if (line->redirect_output != NULL && idx == line->ncommands - 1) {
 			const int out_fd = open(line->redirect_output, O_CREAT | O_TRUNC | O_WRONLY, 0644);
-			dup2(out_fd, STDOUT_FILENO); 	 // Redirect stdout into filefd
+			dup2(out_fd, STDOUT_FILENO);
 			close(out_fd);
 		}
 		// if it has a redirect error filename we redirect STDERR into the fd of the new file
@@ -137,18 +142,19 @@ int main (void)
 
 
 	while(1){
-		char buf[1024] = {0};
-		char path[512] = {0};
+		char buf[BUFSIZE] = {0};
+		char path[BUFSIZE] = {0};
 
 		getcwd(path, sizeof(path)); // getcwd() to print it inside the prompt
 
-    	printf("[: \033[1;33m%s \033[0m ] msh> ", path); // yellow prompt
+    	printf("[:" YELLOW " %s " END "] msh> ", path); // yellow prompt
 
 		fflush(stdout);
-		if (fgets(buf, 1024, stdin) == NULL) {
+		if (fgets(buf, BUFSIZE, stdin) == NULL) {
 			if (feof(stdin)) { printf("\nEnd of input. Exiting...\n");
 				break;
-			} else if (ferror(stdin)) {
+			}
+			if (ferror(stdin)) {
 				perror("Error reading input"); clearerr(stdin);
 			}
 		} else {
