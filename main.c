@@ -19,21 +19,22 @@
  *
  */
 
-void execute_pipeline(tline * line) {
-	// TODO: Array dinámico de PIDs
+void execute_pipeline(const tline * line) {
+	// pid_t pids[line->ncommands]; preguntar si se puede hacer de la otra forma
+	int in_fd = 0;
+
 	for (int i = 0; i < line->ncommands; i++) {
 		if (line->commands[i].filename == NULL) {
 			fprintf(stderr, "%s: command not found\n", line->commands[i].argv[0]);
 			break;
 		}
-
 		int pipefd[2];
 		pipe(pipefd);
 
 		const pid_t pid = fork();
 
 		if (pid == -1) { perror("fork"); exit(1); }
-		if (pid == 0) {
+		if (pid == 0) { // Child
 			signal(SIGINT, SIG_DFL);
 
 			/*
@@ -41,14 +42,15 @@ void execute_pipeline(tline * line) {
 			 * pipefd[1] -> Write end
 			 */
 
-			if (i == 0) {
-				// Si es el primero
-				close(pipefd[0]); // unused
+			if ( i != line->ncommands-1) { // Si no es el ultimo sustituimos stdout por el write end
 				dup2(pipefd[1], STDOUT_FILENO);
 				close(pipefd[1]);
+				close(pipefd[0]);
 			}
-			if ( i < line->ncommands-1 && i > 0 ) {
-				dup2(pipefd[0], STDIN_FILENO);
+
+			if ( i != 0 ) { // si no es el primero sustituimos stdin por el read end del anterior
+				dup2(in_fd, STDIN_FILENO);
+				close(in_fd);
 			}
 
 
@@ -59,14 +61,12 @@ void execute_pipeline(tline * line) {
 				dup2(input_fd, STDIN_FILENO); // Sustituye la entrada de STDIN (0) por input_fd
 				close(input_fd); // Cierra input_fd (original)
 			}
-
 			// if it has a redirect output filename we redirect STDOUT into the fd of the new file
 			if (line->redirect_output != NULL && i == line->ncommands - 1) {
 				const int out_fd = open(line->redirect_output, O_CREAT | O_TRUNC | O_WRONLY, 0644);
 				dup2(out_fd, STDOUT_FILENO);
 				close(out_fd);
 			}
-
 			// if it has a redirect error filename we redirect STDERR into the fd of the new file
 			if (line->redirect_error != NULL && i == line->ncommands - 1) {
 				const int err_fd = open(line->redirect_error, O_CREAT | O_TRUNC | O_WRONLY, 0644);
@@ -75,12 +75,24 @@ void execute_pipeline(tline * line) {
 			}
 
 			execvp(line->commands[i].argv[0], line->commands[i].argv);
+			fprintf(stderr, "Something went wrong!\n");
+			// Cuando haces ls -ñ peta
+		}
+		// Parent
+		if (i < line->ncommands - 1 ) {
+			close(pipefd[1]);
+		}
+		if (i != 0) {
+			close(in_fd);
 
 		}
-
+		in_fd = pipefd[0];
 	}
 
-	// TODO: waitpid() for i in pids
+	for (int j = 0; j < line->ncommands; j++) {
+		wait(NULL);
+	}
+
 }
 
 
@@ -194,7 +206,7 @@ void eval(const tline * line) {
 	} else if (!strcmp(line->commands[0].argv[0], "exit") || !strcmp(line->commands[0].argv[0], "quit")) {
 		exit(0);
 	} else {
-		execute_command(line, 0);
+		execute_pipeline(line);
 	}
 
 }
