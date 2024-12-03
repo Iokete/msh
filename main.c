@@ -17,18 +17,83 @@
  * Creates a child process to execute a command via execvp
  * We don't take as a parameter line->command because of the needed use of redirection info
  *
- *
- * */
+ */
+
+void execute_pipeline(tline * line) {
+	// TODO: Array dinámico de PIDs
+	for (int i = 0; i < line->ncommands; i++) {
+		if (line->commands[i].filename == NULL) {
+			fprintf(stderr, "%s: command not found\n", line->commands[i].argv[0]);
+			break;
+		}
+
+		int pipefd[2];
+		pipe(pipefd);
+
+		const pid_t pid = fork();
+
+		if (pid == -1) { perror("fork"); exit(1); }
+		if (pid == 0) {
+			signal(SIGINT, SIG_DFL);
+
+			/*
+			 * pipefd[0] -> Read end
+			 * pipefd[1] -> Write end
+			 */
+
+			if (i == 0) {
+				// Si es el primero
+				close(pipefd[0]); // unused
+				dup2(pipefd[1], STDOUT_FILENO);
+				close(pipefd[1]);
+			}
+			if ( i < line->ncommands-1 && i > 0 ) {
+				dup2(pipefd[0], STDIN_FILENO);
+			}
+
+
+			// if it has a redirect input filename we redirect STDIN into the fd of the provided file
+			if (line->redirect_input != NULL && i == 0) {
+				const int input_fd = open(line->redirect_input, O_RDONLY);
+				if (input_fd == -1) { perror("open"); exit(1); }
+				dup2(input_fd, STDIN_FILENO); // Sustituye la entrada de STDIN (0) por input_fd
+				close(input_fd); // Cierra input_fd (original)
+			}
+
+			// if it has a redirect output filename we redirect STDOUT into the fd of the new file
+			if (line->redirect_output != NULL && i == line->ncommands - 1) {
+				const int out_fd = open(line->redirect_output, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+				dup2(out_fd, STDOUT_FILENO);
+				close(out_fd);
+			}
+
+			// if it has a redirect error filename we redirect STDERR into the fd of the new file
+			if (line->redirect_error != NULL && i == line->ncommands - 1) {
+				const int err_fd = open(line->redirect_error, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+				dup2(err_fd, STDERR_FILENO);
+				close(err_fd);
+			}
+
+			execvp(line->commands[i].argv[0], line->commands[i].argv);
+
+		}
+
+	}
+
+	// TODO: waitpid() for i in pids
+}
+
+
 void execute_command(const tline *line, const int idx) {
 
 	if (line->commands[idx].filename == NULL) {
-		printf("%s: command not found\n", line->commands[idx].argv[0]);
+		fprintf(stderr, "%s: command not found\n", line->commands[idx].argv[0]);
 		execute_command(line, idx + 1);
 	}
 
 	int pipefd[2];
+	pipe(pipefd);
 
-	if (pipe(pipefd) == -1) { perror("pipe"); exit(1); }
 
 	const pid_t pid = fork();
 
@@ -40,12 +105,13 @@ void execute_command(const tline *line, const int idx) {
 		 * pipefd[0] -> Read end
 		 * pipefd[1] -> Write end
 		 */
+
 		// if it has a redirect input filename we redirect STDIN into the fd of the provided file
 		if (line->redirect_input != NULL && idx == 0) {
-			const int in_fd = open(line->redirect_input, O_RDONLY);
-			if (in_fd == -1) { perror("open"); exit(1); }
-			dup2(in_fd, STDIN_FILENO);
-			close(in_fd);
+			const int input_fd = open(line->redirect_input, O_RDONLY);
+			if (input_fd == -1) { perror("open"); exit(1); }
+			dup2(input_fd, STDIN_FILENO); // Sustituye la entrada de STDIN (0) por input_fd
+			close(input_fd); // Cierra input_fd (original)
 		}
 
 		// if it has a redirect output filename we redirect STDOUT into the fd of the new file
@@ -54,6 +120,7 @@ void execute_command(const tline *line, const int idx) {
 			dup2(out_fd, STDOUT_FILENO);
 			close(out_fd);
 		}
+
 		// if it has a redirect error filename we redirect STDERR into the fd of the new file
 		if (line->redirect_error != NULL && idx == line->ncommands - 1) {
 			const int err_fd = open(line->redirect_error, O_CREAT | O_TRUNC | O_WRONLY, 0644);
@@ -125,7 +192,6 @@ void eval(const tline * line) {
 	if (!strcmp(line->commands[0].argv[0], "cd")) {
 		cd(line);
 	} else if (!strcmp(line->commands[0].argv[0], "exit") || !strcmp(line->commands[0].argv[0], "quit")) {
-		wait(NULL);  // to avoid zombie processes
 		exit(0);
 	} else {
 		execute_command(line, 0);
