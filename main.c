@@ -36,6 +36,7 @@ void execute_pipeline(const tline * line) {
 		if (pid == -1) { perror("fork"); exit(1); }
 		if (pid == 0) { // Child
 			signal(SIGINT, SIG_DFL);
+			signal(SIGQUIT, SIG_DFL);
 
 			/*
 			 * pipefd[0] -> Read end
@@ -163,32 +164,38 @@ int main (void)
 	signal(SIGINT, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
 
-
-	while(1){
+	while (1){
+		//memset(buf, '\0', sizeof(buf)); // En la primera iteración ya es 0, pero en las siguientes no.
+		// Con path no lo hacemos porque getcwd() copia por encima el contenido para su tamaño total.
 		char buf[BUFSIZE] = {0};
 		char path[BUFSIZE] = {0};
 
 		getcwd(path, sizeof(path)); // getcwd() to print it inside the prompt
 
-    	printf("[:" YELLOW " %s " END "] msh> ", path); // yellow prompt
+		printf("[:" YELLOW " %s " END "] msh> ", path); // yellow prompt
 
 		fflush(stdout);
-		if (fgets(buf, BUFSIZE, stdin) == NULL) {
-			if (feof(stdin)) { printf("\nEnd of input. Exiting...\n");
-				break;
+		if (fgets(buf, BUFSIZE, stdin)) {
+			if (feof(stdin)) {
+				printf("%s", "Detected Ctrl+D or EOF, exiting.\n");
+				exit(0);
 			}
-			if (ferror(stdin)) {
-				perror("Error reading input"); clearerr(stdin);
+
+			if (buf != NULL) {
+				const tline *line = tokenize(buf);
+
+				if(line->ncommands == 0) continue;
+
+				eval(line);
 			}
-		} else {
-			const tline *line = tokenize(buf);
-
-			if(line == NULL) continue;
-
-			eval(line);
 		}
 
-	}
+
+
+
+		}
+
+
 
 	return 0;
 }
