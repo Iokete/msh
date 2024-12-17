@@ -12,6 +12,49 @@
 #define YELLOW "\033[1;33m"
 #define END "\033[0m"
 #define BUFSIZE 1024
+#define STATUS_SIZE 16
+
+typedef struct Job {
+	int id;
+	pid_t gid;
+	char *command;
+	// We will use tokenize inside the functions, this way we can print the full (piped in case it is piped) command
+	char status[STATUS_SIZE];
+	struct Job *next;
+} tjob;
+
+tjob *jobs = NULL; // Head
+int job_id = 0;
+
+void add_job(const pid_t pgid, const char *command) {
+	tjob *new_job = malloc(sizeof(tjob));
+	new_job->id = job_id++;
+	new_job->gid = pgid;
+	new_job->command = strndup(command, BUFSIZE);
+	strncpy(new_job->status, "Running", STATUS_SIZE);
+	new_job->next = jobs;
+	jobs = new_job;
+}
+
+
+tjob *get_job(const pid_t pgid) {
+	tjob * curr = jobs;
+	while (curr) {
+		if (curr->gid == pgid) {
+			return curr;
+		}
+		curr = curr->next;
+	}
+	return NULL;
+}
+
+void print_jobs() {
+	const tjob *curr = jobs;
+	while (curr) {
+		printf("[%d] Running %s\n", curr->id, curr->command);
+	}
+}
+
 
 /*
  * Creates a child process to execute a command via execvp
