@@ -96,61 +96,6 @@ void execute_pipeline(const tline * line) {
 }
 
 
-void execute_command(const tline *line, const int idx) {
-
-	if (line->commands[idx].filename == NULL) {
-		fprintf(stderr, "%s: command not found\n", line->commands[idx].argv[0]);
-		execute_command(line, idx + 1);
-	}
-
-	int pipefd[2];
-	pipe(pipefd);
-
-
-	const pid_t pid = fork();
-
-	if (pid == -1) { perror("fork"); exit(1); }
-	if (pid == 0) {
-		signal(SIGINT, SIG_DFL);
-
-		/*
-		 * pipefd[0] -> Read end
-		 * pipefd[1] -> Write end
-		 */
-
-		// if it has a redirect input filename we redirect STDIN into the fd of the provided file
-		if (line->redirect_input != NULL && idx == 0) {
-			const int input_fd = open(line->redirect_input, O_RDONLY);
-			if (input_fd == -1) { perror("open"); exit(1); }
-			dup2(input_fd, STDIN_FILENO); // Sustituye la entrada de STDIN (0) por input_fd
-			close(input_fd); // Cierra input_fd (original)
-		}
-
-		// if it has a redirect output filename we redirect STDOUT into the fd of the new file
-		if (line->redirect_output != NULL && idx == line->ncommands - 1) {
-			const int out_fd = open(line->redirect_output, O_CREAT | O_TRUNC | O_WRONLY, 0644);
-			dup2(out_fd, STDOUT_FILENO);
-			close(out_fd);
-		}
-
-		// if it has a redirect error filename we redirect STDERR into the fd of the new file
-		if (line->redirect_error != NULL && idx == line->ncommands - 1) {
-			const int err_fd = open(line->redirect_error, O_CREAT | O_TRUNC | O_WRONLY, 0644);
-			dup2(err_fd, STDERR_FILENO);
-			close(err_fd);
-		}
-
-		execvp(line->commands[idx].argv[0], line->commands[idx].argv);
-
-	} else {
-		waitpid(pid, NULL, 0);
-		if (idx < line->ncommands - 1) {
-			execute_command(line, idx + 1);
-		}
-
-	}
-}
-
 /*
  * Definition of cd shell builtin
  *
