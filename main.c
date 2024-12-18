@@ -13,45 +13,88 @@
 #define END "\033[0m"
 #define BUFSIZE 1024
 #define STATUS_SIZE 16
+#define MAX_JOBS 256
 
 typedef struct Job {
 	int id;
-	pid_t gid;
-	char *command;
-	// We will use tokenize inside the functions, this way we can print the full (piped in case it is piped) command
-	char status[STATUS_SIZE];
-	struct Job *next;
-} tjob;
+	char command[BUFSIZE];
+	pid_t *pids;
+	int stopped; // 1 stopped | 0 running
+	int num_pids;
+} Job;
 
-tjob *jobs = NULL; // Head
-int job_id = 0;
+Job jobs[MAX_JOBS];
+int job_count = 0;
 
-void add_job(const pid_t pgid, const char *command) {
-	tjob *new_job = malloc(sizeof(tjob));
-	new_job->id = job_id++;
-	new_job->gid = pgid;
-	new_job->command = strndup(command, BUFSIZE);
-	strncpy(new_job->status, "Running", STATUS_SIZE);
-	new_job->next = jobs;
-	jobs = new_job;
-}
-
-
-tjob *get_job(const pid_t pgid) {
-	tjob * curr = jobs;
-	while (curr) {
-		if (curr->gid == pgid) {
-			return curr;
-		}
-		curr = curr->next;
+void add_job(char* command) {
+	if (job_count >= MAX_JOBS) {
+		fprintf(stderr, "%s", "Max jobs reached!\n");
+		return;
 	}
-	return NULL;
+
+	const tline *line = tokenize(command);
+
+	jobs[job_count].id = job_count+1;
+	jobs[job_count].pids = malloc(sizeof(pid_t) * line->ncommands);
+	strncpy(jobs[job_count].command, command, BUFSIZE);
+	jobs[job_count].stopped = 0;
+
+	job_count++;
 }
 
-void print_jobs() {
-	const tjob *curr = jobs;
-	while (curr) {
-		printf("[%d] Running %s\n", curr->id, curr->command);
+void stop_job(const int job_id) {
+	for (int i = 0; i < job_count; i++) {
+		if (jobs[i].id == job_id) {
+			for (int j = 0; j < jobs[i].num_pids; j++) {
+				if (kill(jobs[i].pids[j], SIGSTOP) == -1) {
+					perror("kill");
+				}
+			}
+			jobs[i].stopped = 1; // Set job as stopped
+			printf("Job [%d] stopped. \n", job_id);
+			return;
+		}
+	}
+	fprintf(stderr, "Job ID %d not found.\n", job_id);
+}
+
+void bg(const int job_id) {
+	for (int i = 0; i < job_count; i++) {
+		if (jobs[i].id == job_id) {
+			if (jobs[i].stopped == 1) {
+				for (int j = 0; j < jobs[i].num_pids; j++) {
+					if (kill(jobs[i].pids[j], SIGCONT) == -1 ) {
+						perror("kill");
+					}
+					printf("Resumed job [%d] in the background\n", job_id);
+				}
+			} else {
+				printf("The job [%d] is already running!\n", job_id);
+			}
+
+		}
+	}
+}
+
+void delete_job(const int job_id) {
+	for (int i = 0; i < job_count; i++) {
+		if (jobs[i].id == job_id) {
+			for (int j = i; j < job_count - 1; j++) {
+				jobs[j] = jobs[j + 1];
+			}
+			job_count--;
+			printf("Deleted job [%d]", job_id);
+		}
+	}
+	fprintf(stderr, "Job ID %d not found\n", job_id);
+}
+
+
+void fg(const int job_id) {
+	for (int i = 0; i < job_count; i++) {
+		if (jobs[i].id == job_id) {
+
+		}
 	}
 }
 
@@ -120,7 +163,6 @@ void execute_pipeline(const tline * line) {
 
 			execvp(line->commands[i].argv[0], line->commands[i].argv);
 			fprintf(stderr, "Something went wrong!\n");
-			// Cuando haces ls -ñ peta
 		}
 		// Parent
 		if (i < line->ncommands - 1 ) {
@@ -208,22 +250,14 @@ int main (void)
 	signal(SIGQUIT, SIG_IGN);
 
 	while (1){
-		//memset(buf, '\0', sizeof(buf)); // En la primera iteración ya es 0, pero en las siguientes no.
-		// Con path no lo hacemos porque getcwd() copia por encima el contenido para su tamaño total.
 		char buf[BUFSIZE] = {0};
 		char path[BUFSIZE] = {0};
 
 		getcwd(path, sizeof(path)); // getcwd() to print it inside the prompt
-
-		printf("[:" YELLOW " %s " END "] msh> ", path); // yellow prompt
-
+		printf("[:" YELLOW " %s " END "] msh> ", path);
 		fflush(stdout);
-		if (fgets(buf, BUFSIZE, stdin)) {
-			if (feof(stdin)) {
-				printf("%s", "Detected Ctrl+D or EOF, exiting.\n");
-				exit(0);
-			}
 
+		if (fgets(buf, BUFSIZE, stdin)) {
 			if (buf != NULL) {
 				const tline *line = tokenize(buf);
 
@@ -232,11 +266,7 @@ int main (void)
 				eval(line);
 			}
 		}
-
-
-
-
-		}
+	}
 
 
 
