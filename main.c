@@ -12,7 +12,6 @@
 #define YELLOW "\033[1;33m"
 #define END "\033[0m"
 #define BUFSIZE 1024
-#define MAX_JOBS 256
 
 typedef struct Job {
 	int id;
@@ -22,22 +21,17 @@ typedef struct Job {
 	int num_pids;
 } Job;
 
-Job jobs[MAX_JOBS];
+Job *jobs;
 int job_count = 0;
 
 void add_job(char* command) {
-	if (job_count >= MAX_JOBS) {
-		fprintf(stderr, "%s", "Max jobs reached!\n");
-		return;
-	}
 
-	command[strlen(command) - 1] = '\n';
+	command[strlen(command) - 1] = '\0';
 	const tline *line = tokenize(command);
 
 	jobs[job_count].id = job_count;
 	jobs[job_count].pids = malloc(sizeof(pid_t) * line->ncommands);
 	jobs[job_count].command = strdup(command);
-//	strncpy(jobs[job_count].command, command, BUFSIZE);
 	jobs[job_count].stopped = 0;
 	jobs[job_count].num_pids = line->ncommands;
 
@@ -53,11 +47,11 @@ void stop_job(const int job_id) {
 				}
 			}
 			jobs[i].stopped = 1; // Set job as stopped
-			printf("Job [%d] stopped. \n", job_id);
+			printf("\nJob [%d] stopped. \n", job_id);
 			return;
 		}
 	}
-	fprintf(stderr, "Job ID %d not found.\n", job_id);
+	fprintf(stderr, "\nJob ID %d not found.\n", job_id);
 }
 
 void bg(const int job_id) {
@@ -112,12 +106,15 @@ void sigchld_handler(int sig) {
 		for (int i = 0; i < job_count; i++) {
 			for (int j = 0; j < jobs[i].num_pids; j++) {
 				if (pid == jobs[i].pids[j]) {
+					fflush(stdout);
 					if (WIFEXITED(status)) {
-						printf("Job [%d] (%s) finished with status %d\n", jobs[i].id, jobs[i].command, WEXITSTATUS(status));
+						printf("\nJob [%d] (%s) finished with status %d\n", jobs[i].id, jobs[i].command, WEXITSTATUS(status));
 					} else if (WIFSIGNALED(status)) {
-						printf("Job [%d] terminated with signal %d\n", jobs[i].id, WTERMSIG(status));
+						printf("\nJob [%d] terminated with signal %d\n", jobs[i].id, WTERMSIG(status));
 					}
+					fflush(stdout);
 					//delete_job(jobs[i].id); Todo descomentar esto, esta comentado porque si de momento esto debe suceder cuando este hecho bg
+					jobs[i].stopped = 1;
 					break;
 				}
 			}
@@ -132,15 +129,24 @@ void print_jobs() {
 		char *running = "Stopped";
 		for (int i = 0; i < job_count; i++) {
 			if (!jobs[i].stopped) running = "Running";
-			printf("[%d] %s \t\t%s", jobs[i].id, running, jobs[i].command);
+			printf("[%d] %s \t\t%s\n", jobs[i].id, running, jobs[i].command);
 		}
 	}
 }
 
-
+// TODO: usar el getjob pq hace cosas raras si no
 void fg(const int job_id) {
+	signal(SIGINT, SIG_IGN);
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == job_id) {
+			if (!jobs[i].stopped) {
+				for (int j = 0; j < jobs[i].num_pids; j++) {
+					waitpid(jobs[i].pids[j], NULL, 0);
+				}
+				jobs[i].stopped = 1;
+			} else {
+				printf("Job [%d] is not running.\n", job_id);
+			}
 			return;
 		}
 	}
@@ -166,7 +172,15 @@ void execute_pipeline(const tline * line, char *cmd) {
 
 
 
-	if (line->background) add_job(cmd);
+	if (line->background) {
+
+		if (job_count == 0) {
+			jobs = malloc(sizeof(Job));
+		} else {
+			jobs = realloc(jobs, sizeof(Job) * (job_count + 1));
+		}
+		add_job(cmd);
+	}
 	for (int i = 0; i < line->ncommands; i++) {
 
 		int pipefd[2];
@@ -235,11 +249,11 @@ void execute_pipeline(const tline * line, char *cmd) {
 		}
 	}
 
-	//if (!line->background) { //Todo descomentar esto cuando este implementado el bg
+	if (!line->background) { //Todo descomentar esto cuando este implementado el bg
 		for (int i = 0; i < line->ncommands; i++) {
 			waitpid(pids[i], NULL, 0);
 		}
-	//}
+	}
 
 
 	free(pids);
@@ -295,7 +309,6 @@ void cd(const tline *line) {
  */
 
 void eval(const tline * line, char * command) {
-
 	if (!strcmp(line->commands[0].argv[0], "cd")) {
 		cd(line);
 	} else if (!strcmp(line->commands[0].argv[0], "exit") || !strcmp(line->commands[0].argv[0], "quit")) {
@@ -308,7 +321,10 @@ void eval(const tline * line, char * command) {
 			if (try == 'n') return;
 		}
 		exit(0);
-	} else if (!strcmp(line->commands[0].argv[0], "jobs")) {
+	} else if (!strcmp(line->commands[0].argv[0], "fg")) {
+		fg(atoi(line->commands[0].argv[0]));
+	}
+	else if (!strcmp(line->commands[0].argv[0], "jobs")) {
 		print_jobs();
 	} else {
 		execute_pipeline(line, command);
