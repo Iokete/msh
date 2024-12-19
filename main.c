@@ -16,7 +16,7 @@
 
 typedef struct Job {
 	int id;
-	char command[BUFSIZE];
+	char *command;
 	pid_t *pids;
 	int stopped; // 1 stopped (true) | 0 running (false)
 	int num_pids;
@@ -31,12 +31,15 @@ void add_job(char* command) {
 		return;
 	}
 
+	command[strlen(command) - 1] = '\n';
 	const tline *line = tokenize(command);
 
-	jobs[job_count].id = job_count+1;
+	jobs[job_count].id = job_count;
 	jobs[job_count].pids = malloc(sizeof(pid_t) * line->ncommands);
-	strncpy(jobs[job_count].command, command, BUFSIZE);
+	jobs[job_count].command = strdup(command);
+//	strncpy(jobs[job_count].command, command, BUFSIZE);
 	jobs[job_count].stopped = 0;
+	jobs[job_count].num_pids = line->ncommands;
 
 	job_count++;
 }
@@ -78,25 +81,27 @@ void bg(const int job_id) {
 void delete_job(const int job_id) {
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == job_id) {
+			free(jobs[i].pids);
+			free(jobs[i].command);
 			for (int j = i; j < job_count - 1; j++) {
 				jobs[j] = jobs[j + 1];
 			}
 			job_count--;
-			free(jobs[i].pids);
-			printf("Deleted job [%d]", job_id);
+
+			printf("Deleted job [%d]\n", job_id);
 		}
 	}
 	fprintf(stderr, "Job ID %d not found\n", job_id);
 }
 
 Job *getJob(int id) {
-	Job *result = NULL;
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == id) {
-			result = &jobs[i];
+			return &jobs[i];
 		}
 	}
-	return result;
+	fprintf(stderr, "ERROR: ID %d not found.\n", id);
+	return NULL;
 }
 
 void sigchld_handler(int sig) {
@@ -105,14 +110,14 @@ void sigchld_handler(int sig) {
 
 	while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
 		for (int i = 0; i < job_count; i++) {
-			for (int j = 0; j < jobs[i].num_pids; i++) {
+			for (int j = 0; j < jobs[i].num_pids; j++) {
 				if (pid == jobs[i].pids[j]) {
 					if (WIFEXITED(status)) {
 						printf("Job [%d] (%s) finished with status %d\n", jobs[i].id, jobs[i].command, WEXITSTATUS(status));
 					} else if (WIFSIGNALED(status)) {
 						printf("Job [%d] terminated with signal %d\n", jobs[i].id, WTERMSIG(status));
 					}
-					delete_job(jobs[i].id);
+					//delete_job(jobs[i].id); Todo descomentar esto, esta comentado porque si de momento esto debe suceder cuando este hecho bg
 					break;
 				}
 			}
@@ -210,7 +215,7 @@ void execute_pipeline(const tline * line, char *cmd) {
 				dup2(err_fd, STDERR_FILENO);
 				close(err_fd);
 			}
-
+			fflush(stdout);
 			execvp(line->commands[i].argv[0], line->commands[i].argv);
 			fprintf(stderr, "Something went wrong!\n");
 		}
@@ -223,12 +228,18 @@ void execute_pipeline(const tline * line, char *cmd) {
 
 		}
 		in_fd = pipefd[0];
-		getJob(job_count)->pids[i] = pid;
+		if (line->background) {
+			Job *curr = getJob(job_count - 1);
+			curr->pids[i] = pid;
+
+		}
 	}
 
-	for (int j = 0; j < line->ncommands; j++) {
-		wait(NULL);
-	}
+	//if (!line->background) { //Todo descomentar esto cuando este implementado el bg
+		for (int i = 0; i < line->ncommands; i++) {
+			waitpid(pids[i], NULL, 0);
+		}
+	//}
 
 
 	free(pids);
@@ -319,7 +330,7 @@ int main (void)
 		getcwd(path, sizeof(path)); // getcwd() to print it inside the prompt
 		printf("[:" YELLOW " %s " END "] msh> ", path);
 		fflush(stdout);
-
+		fflush(stdin);
 		if (fgets(buf, BUFSIZE, stdin)) {
 			if (buf != NULL) {
 				const tline *line = tokenize(buf);
