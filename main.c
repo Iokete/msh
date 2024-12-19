@@ -89,6 +89,16 @@ void delete_job(const int job_id) {
 	fprintf(stderr, "Job ID %d not found\n", job_id);
 }
 
+Job *getJob(int id) {
+	Job *result = NULL;
+	for (int i = 0; i < job_count; i++) {
+		if (jobs[i].id == id) {
+			result = &jobs[i];
+		}
+	}
+	return result;
+}
+
 void sigchld_handler(int sig) {
 	pid_t pid;
 	int status;
@@ -139,7 +149,7 @@ void fg(const int job_id) {
  */
 
 void execute_pipeline(const tline * line, char *cmd) {
-	// pid_t pids[line->ncommands]; preguntar si se puede hacer de la otra forma
+	pid_t *pids = malloc(sizeof(pid_t) * line->ncommands);
 	int in_fd = 0;
 
 	for (int j = 0; j < line->ncommands; j++) {
@@ -149,9 +159,9 @@ void execute_pipeline(const tline * line, char *cmd) {
 		}
 	}
 
+
+
 	if (line->background) add_job(cmd);
-
-
 	for (int i = 0; i < line->ncommands; i++) {
 
 		int pipefd[2];
@@ -213,12 +223,15 @@ void execute_pipeline(const tline * line, char *cmd) {
 
 		}
 		in_fd = pipefd[0];
+		getJob(job_count)->pids[i] = pid;
 	}
 
 	for (int j = 0; j < line->ncommands; j++) {
 		wait(NULL);
 	}
 
+
+	free(pids);
 }
 
 
