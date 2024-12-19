@@ -12,14 +12,13 @@
 #define YELLOW "\033[1;33m"
 #define END "\033[0m"
 #define BUFSIZE 1024
-#define STATUS_SIZE 16
 #define MAX_JOBS 256
 
 typedef struct Job {
 	int id;
 	char command[BUFSIZE];
 	pid_t *pids;
-	int stopped; // 1 stopped | 0 running
+	int stopped; // 1 stopped (true) | 0 running (false)
 	int num_pids;
 } Job;
 
@@ -83,17 +82,51 @@ void delete_job(const int job_id) {
 				jobs[j] = jobs[j + 1];
 			}
 			job_count--;
+			free(jobs[i].pids);
 			printf("Deleted job [%d]", job_id);
 		}
 	}
 	fprintf(stderr, "Job ID %d not found\n", job_id);
 }
 
+void sigchld_handler(int sig) {
+	pid_t pid;
+	int status;
+
+	while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+		for (int i = 0; i < job_count; i++) {
+			for (int j = 0; j < jobs[i].num_pids; i++) {
+				if (pid == jobs[i].pids[j]) {
+					if (WIFEXITED(status)) {
+						printf("Job [%d] (%s) finished with status %d\n", jobs[i].id, jobs[i].command, WEXITSTATUS(status));
+					} else if (WIFSIGNALED(status)) {
+						printf("Job [%d] terminated with signal %d\n", jobs[i].id, WTERMSIG(status));
+					}
+					delete_job(jobs[i].id);
+					break;
+				}
+			}
+		}
+	}
+}
+
+void print_jobs() {
+	if (job_count <= 0) {
+		printf("%s", "There are no jobs.\n");
+	} else {
+		char *running = "Stopped";
+		for (int i = 0; i < job_count; i++) {
+			if (!jobs[i].stopped) running = "Running";
+			printf("[%d] %s \t\t%s", jobs[i].id, running, jobs[i].command);
+		}
+	}
+}
+
 
 void fg(const int job_id) {
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == job_id) {
-
+			return;
 		}
 	}
 }
@@ -105,15 +138,22 @@ void fg(const int job_id) {
  *
  */
 
-void execute_pipeline(const tline * line) {
+void execute_pipeline(const tline * line, char *cmd) {
 	// pid_t pids[line->ncommands]; preguntar si se puede hacer de la otra forma
 	int in_fd = 0;
 
-	for (int i = 0; i < line->ncommands; i++) {
-		if (line->commands[i].filename == NULL) {
-			fprintf(stderr, "%s: command not found\n", line->commands[i].argv[0]);
-			break;
+	for (int j = 0; j < line->ncommands; j++) {
+		if (line->commands[j].filename == NULL) {
+			fprintf(stderr, "%s: command not found\n", line->commands[j].argv[0]);
+			return;
 		}
+	}
+
+	if (line->background) add_job(cmd);
+
+
+	for (int i = 0; i < line->ncommands; i++) {
+
 		int pipefd[2];
 		pipe(pipefd);
 
@@ -230,24 +270,34 @@ void cd(const tline *line) {
  *
  */
 
-void eval(const tline * line) {
+void eval(const tline * line, char * command) {
 
 	if (!strcmp(line->commands[0].argv[0], "cd")) {
 		cd(line);
 	} else if (!strcmp(line->commands[0].argv[0], "exit") || !strcmp(line->commands[0].argv[0], "quit")) {
+		if (job_count > 0) {
+			printf("There are running jobs, are you sure? (y/n): ");
+			fflush(stdout);
+			const char try;
+			scanf(" %c", &try);
+			while (getchar() != '\n');
+			if (try == 'n') return;
+		}
 		exit(0);
+	} else if (!strcmp(line->commands[0].argv[0], "jobs")) {
+		print_jobs();
 	} else {
-		execute_pipeline(line);
+		execute_pipeline(line, command);
 	}
 
 }
-
 
 
 int main (void) 
 {
 	signal(SIGINT, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
+	signal(SIGCHLD, sigchld_handler);
 
 	while (1){
 		char buf[BUFSIZE] = {0};
@@ -263,7 +313,7 @@ int main (void)
 
 				if(line->ncommands == 0) continue;
 
-				eval(line);
+				eval(line, buf);
 			}
 		}
 	}
