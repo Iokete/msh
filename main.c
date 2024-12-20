@@ -8,9 +8,6 @@
 
 #include "include/parser.h"
 
-
-#define YELLOW "\033[1;33m"
-#define END "\033[0m"
 #define BUFSIZE 1024
 
 typedef struct Job {
@@ -38,24 +35,6 @@ void add_job(char* command) {
 	job_count++;
 }
 
-
-
-void stop_job(const int job_id) {
-	for (int i = 0; i < job_count; i++) {
-		if (jobs[i].id == job_id) {
-			for (int j = 0; j < jobs[i].num_pids; j++) {
-				if (kill(jobs[i].pids[j], SIGSTOP) == -1) {
-					perror("kill");
-				}
-			}
-			jobs[i].stopped = 1; // Set job as stopped
-			printf("\nJob [%d] stopped. \n", job_id);
-			return;
-		}
-	}
-	fprintf(stderr, "\nJob ID %d not found.\n", job_id);
-}
-
 void delete_job(const int job_id) {
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == job_id) {
@@ -67,6 +46,7 @@ void delete_job(const int job_id) {
 			job_count--;
 
 			printf("Deleted job [%d]\n", job_id);
+			////fflush(stdout);
 			return;
 		}
 	}
@@ -91,12 +71,13 @@ void sigchld_handler(int sig) {
 		for (int i = 0; i < job_count; i++) {
 			for (int j = 0; j < jobs[i].num_pids; j++) {
 				if (pid == jobs[i].pids[j]) {
-					fflush(stdout);
+
 					if (WIFEXITED(status)) {
 						printf("\nJob [%d] (%s) finished with status %d\n", jobs[i].id, jobs[i].command, WEXITSTATUS(status));
 					} else if (WIFSIGNALED(status)) {
 						printf("\nJob [%d] terminated with signal %d\n", jobs[i].id, WTERMSIG(status));
 					}
+					////fflush(stdout);
 					jobs[i].stopped = 1;
 					delete_job(jobs[i].id);
 					break;
@@ -192,17 +173,15 @@ void execute_pipeline(const tline * line, char *cmd) {
 			 * pipefd[0] -> Read end
 			 * pipefd[1] -> Write end
 			 */
-			if (!line->background) {
-				if ( i != line->ncommands-1) { // Si no es el ultimo sustituimos stdout por el write end
-					dup2(pipefd[1], STDOUT_FILENO);
-					close(pipefd[1]);
-					close(pipefd[0]);
-				}
-			} else {
+
+			if ( i != line->ncommands-1) { // Si no es el ultimo sustituimos stdout por el write end
 				dup2(pipefd[1], STDOUT_FILENO);
 				close(pipefd[1]);
 				close(pipefd[0]);
 			}
+
+
+
 			if ( i != 0 ) { // si no es el primero sustituimos stdin por el read end del anterior
 				dup2(in_fd, STDIN_FILENO);
 				close(in_fd);
@@ -232,7 +211,7 @@ void execute_pipeline(const tline * line, char *cmd) {
 				dup2(err_fd, STDERR_FILENO);
 				close(err_fd);
 			}
-			fflush(stdout);
+			//fflush(stdout);
 			execvp(line->commands[i].argv[0], line->commands[i].argv);
 			fprintf(stderr, "Something went wrong!\n");
 		}
@@ -246,10 +225,12 @@ void execute_pipeline(const tline * line, char *cmd) {
 
 		}
 		in_fd = pipefd[0];
+
 		if (line->background) {
 			Job *curr = getJob(job_count - 1);
 			curr->pids[i] = pid;
-
+		} else {
+			pids[i] = pid;
 		}
 	}
 
@@ -319,7 +300,7 @@ void eval(const tline * line, char * command) {
 		if (job_count > 0) {
 			char try;
 			printf("There are running jobs, are you sure? (y/n): ");
-			fflush(stdout);
+			//fflush(stdout);
 			scanf(" %c", &try);
 			while (getchar() != '\n');
 			if (try == 'n') return;
@@ -352,13 +333,16 @@ int main (void)
 		char path[BUFSIZE] = {0};
 
 		getcwd(path, sizeof(path)); // getcwd() to print it inside the prompt
-		printf("[:" YELLOW " %s " END "] msh> ", path);
-		fflush(stdout);
+		printf("msh> ");
+
 		if (fgets(buf, BUFSIZE, stdin) == NULL) {
-			printf("\n");
+			//printf("\n");
 			break;
 		}
 		if (buf != NULL) {
+
+				buf[strlen(buf) - 1 ] = '\0';
+
 				const tline *line = tokenize(buf);
 
 				if(line->ncommands == 0) continue;
