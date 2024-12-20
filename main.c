@@ -43,17 +43,21 @@ void delete_job(const int job_id) {
 			for (int j = i; j < job_count - 1; j++) {
 				jobs[j] = jobs[j + 1];
 			}
-			job_count--;
 
+			job_count--;
+			if (job_count == 0) {
+				jobs = malloc(sizeof(Job));
+			} else {
+				jobs = realloc(jobs, sizeof(Job) * (job_count));
+			}
 			printf("Deleted job [%d]\n", job_id);
-			////fflush(stdout);
 			return;
 		}
 	}
 	fprintf(stderr, "Job ID %d not found\n", job_id);
 }
 
-Job *getJob(int id) {
+Job *_get_job(int id) {
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == id) {
 			return &jobs[i];
@@ -62,7 +66,6 @@ Job *getJob(int id) {
 	return NULL;
 }
 
-// todo: no detecta cuando hago contrl c despues de un fg
 void sigchld_handler(int sig) {
 	pid_t pid;
 	int status;
@@ -98,16 +101,11 @@ void print_jobs() {
 	}
 }
 
-void cleanup(const int id) {
-	const Job *job = getJob(id);
-	if (job->stopped) delete_job(id);
-}
-
 void fg(const int job_id) {
 	signal(SIGINT, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
 
-	Job *job = getJob(job_id);
+	Job *job = _get_job(job_id);
 
 	if (job != NULL) {
 		if (!job->stopped) {
@@ -144,8 +142,6 @@ void execute_pipeline(const tline * line, char *cmd) {
 			return;
 		}
 	}
-
-
 
 	if (line->background) {
 
@@ -210,7 +206,6 @@ void execute_pipeline(const tline * line, char *cmd) {
 				dup2(err_fd, STDERR_FILENO);
 				close(err_fd);
 			}
-			//fflush(stdout);
 			execvp(line->commands[i].argv[0], line->commands[i].argv);
 			fprintf(stderr, "Something went wrong!\n");
 		}
@@ -226,7 +221,7 @@ void execute_pipeline(const tline * line, char *cmd) {
 		in_fd = pipefd[0];
 
 		if (line->background) {
-			Job *curr = getJob(job_count - 1);
+			Job *curr = _get_job(job_count - 1);
 			curr->pids[i] = pid;
 		} else {
 			pids[i] = pid;
@@ -287,7 +282,7 @@ void cd(const tline *line) {
 
 /*
  * For each command in ncommands
- * Check if it is cd/exit/bg/fg/jobs (builtins) and call the function
+ * Check if it is cd/exit/fg/jobs (builtins) and call the function
  * Else call execute_command(command[i])
  *
  */
@@ -299,7 +294,6 @@ void eval(const tline * line, char * command) {
 		if (job_count > 0) {
 			char try;
 			printf("There are running jobs, are you sure? (y/n): ");
-			//fflush(stdout);
 			scanf(" %c", &try);
 			while (getchar() != '\n');
 			if (try == 'n') return;
@@ -307,7 +301,7 @@ void eval(const tline * line, char * command) {
 		}
 		exit(0);
 	} else if (!strcmp(line->commands[0].argv[0], "fg")) {
-		line->commands[0].argv[1] == NULL ? fg(0) : fg(atoi(line->commands[0].argv[1]));
+		line->commands[0].argv[1] == NULL ? fg(jobs[0].id) : fg(atoi(line->commands[0].argv[1]));
 	}
 	else if (!strcmp(line->commands[0].argv[0], "jobs")) {
 		print_jobs();
