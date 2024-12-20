@@ -77,7 +77,6 @@ void sigchld_handler(int sig) {
 					} else if (WIFSIGNALED(status)) {
 						printf("\nJob [%d] terminated with signal %d\n", jobs[i].id, WTERMSIG(status));
 					}
-					////fflush(stdout);
 					jobs[i].stopped = 1;
 					delete_job(jobs[i].id);
 					break;
@@ -308,10 +307,7 @@ void eval(const tline * line, char * command) {
 		}
 		exit(0);
 	} else if (!strcmp(line->commands[0].argv[0], "fg")) {
-		int id;
-
-		line->commands[0].argv[1] == NULL ? id = 0 : atoi(id);
-		fg(id);
+		line->commands[0].argv[1] == NULL ? fg(0) : fg(atoi(line->commands[0].argv[1]));
 	}
 	else if (!strcmp(line->commands[0].argv[0], "jobs")) {
 		print_jobs();
@@ -336,12 +332,10 @@ int main (void)
 		printf("msh> ");
 
 		if (fgets(buf, BUFSIZE, stdin) == NULL) {
-			//printf("\n");
+			printf("\n");
 			break;
 		}
 		if (buf != NULL) {
-
-				buf[strlen(buf) - 1 ] = '\0';
 
 				const tline *line = tokenize(buf);
 
