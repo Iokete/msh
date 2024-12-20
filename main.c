@@ -38,6 +38,8 @@ void add_job(char* command) {
 	job_count++;
 }
 
+
+
 void stop_job(const int job_id) {
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == job_id) {
@@ -54,24 +56,6 @@ void stop_job(const int job_id) {
 	fprintf(stderr, "\nJob ID %d not found.\n", job_id);
 }
 
-void bg(const int job_id) {
-	for (int i = 0; i < job_count; i++) {
-		if (jobs[i].id == job_id) {
-			if (jobs[i].stopped == 1) {
-				for (int j = 0; j < jobs[i].num_pids; j++) {
-					if (kill(jobs[i].pids[j], SIGCONT) == -1 ) {
-						perror("kill");
-					}
-					printf("Resumed job [%d] in the background\n", job_id);
-				}
-			} else {
-				printf("The job [%d] is already running!\n", job_id);
-			}
-
-		}
-	}
-}
-
 void delete_job(const int job_id) {
 	for (int i = 0; i < job_count; i++) {
 		if (jobs[i].id == job_id) {
@@ -83,6 +67,7 @@ void delete_job(const int job_id) {
 			job_count--;
 
 			printf("Deleted job [%d]\n", job_id);
+			return;
 		}
 	}
 	fprintf(stderr, "Job ID %d not found\n", job_id);
@@ -94,10 +79,10 @@ Job *getJob(int id) {
 			return &jobs[i];
 		}
 	}
-	fprintf(stderr, "ERROR: ID %d not found.\n", id);
 	return NULL;
 }
 
+// todo: no detecta cuando hago contrl c despues de un fg
 void sigchld_handler(int sig) {
 	pid_t pid;
 	int status;
@@ -112,9 +97,8 @@ void sigchld_handler(int sig) {
 					} else if (WIFSIGNALED(status)) {
 						printf("\nJob [%d] terminated with signal %d\n", jobs[i].id, WTERMSIG(status));
 					}
-					fflush(stdout);
-					//delete_job(jobs[i].id); Todo descomentar esto, esta comentado porque si de momento esto debe suceder cuando este hecho bg
 					jobs[i].stopped = 1;
+					delete_job(jobs[i].id);
 					break;
 				}
 			}
@@ -134,22 +118,33 @@ void print_jobs() {
 	}
 }
 
-// TODO: usar el getjob pq hace cosas raras si no
+void cleanup(const int id) {
+	const Job *job = getJob(id);
+	if (job->stopped) delete_job(id);
+}
+
 void fg(const int job_id) {
-	signal(SIGINT, SIG_IGN);
-	for (int i = 0; i < job_count; i++) {
-		if (jobs[i].id == job_id) {
-			if (!jobs[i].stopped) {
-				for (int j = 0; j < jobs[i].num_pids; j++) {
-					waitpid(jobs[i].pids[j], NULL, 0);
-				}
-				jobs[i].stopped = 1;
-			} else {
-				printf("Job [%d] is not running.\n", job_id);
+	signal(SIGINT, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
+
+	Job *job = getJob(job_id);
+
+	if (job != NULL) {
+		if (!job->stopped) {
+			for (int j = 0; j < job->num_pids; j++) {
+				int status;
+				waitpid(job->pids[j], &status, WUNTRACED);
 			}
-			return;
+			job->stopped = 1;
+		} else {
+			printf("Job [%d] is not running.\n", job_id);
 		}
+
+	} else {
+		fprintf(stderr, "\nInvalid job ID %d", job_id);
 	}
+
+
 }
 
 
@@ -165,7 +160,7 @@ void execute_pipeline(const tline * line, char *cmd) {
 
 	for (int j = 0; j < line->ncommands; j++) {
 		if (line->commands[j].filename == NULL) {
-			fprintf(stderr, "%s: command not found\n", line->commands[j].argv[0]);
+			fprintf(stderr, "%s: No se encuentra el mandato.\n", line->commands[j].argv[0]);
 			return;
 		}
 	}
@@ -197,13 +192,17 @@ void execute_pipeline(const tline * line, char *cmd) {
 			 * pipefd[0] -> Read end
 			 * pipefd[1] -> Write end
 			 */
-
-			if ( i != line->ncommands-1) { // Si no es el ultimo sustituimos stdout por el write end
+			if (!line->background) {
+				if ( i != line->ncommands-1) { // Si no es el ultimo sustituimos stdout por el write end
+					dup2(pipefd[1], STDOUT_FILENO);
+					close(pipefd[1]);
+					close(pipefd[0]);
+				}
+			} else {
 				dup2(pipefd[1], STDOUT_FILENO);
 				close(pipefd[1]);
 				close(pipefd[0]);
 			}
-
 			if ( i != 0 ) { // si no es el primero sustituimos stdin por el read end del anterior
 				dup2(in_fd, STDIN_FILENO);
 				close(in_fd);
@@ -213,7 +212,11 @@ void execute_pipeline(const tline * line, char *cmd) {
 			// if it has a redirect input filename we redirect STDIN into the fd of the provided file
 			if (line->redirect_input != NULL && i == 0) {
 				const int input_fd = open(line->redirect_input, O_RDONLY);
-				if (input_fd == -1) { perror("open"); exit(1); }
+				if (input_fd == -1) {
+					fprintf(stderr, "%s: Error. ", line->redirect_input);
+					perror("open");
+					exit(1);
+				}
 				dup2(input_fd, STDIN_FILENO); // Sustituye la entrada de STDIN (0) por input_fd
 				close(input_fd); // Cierra input_fd (original)
 			}
@@ -234,6 +237,7 @@ void execute_pipeline(const tline * line, char *cmd) {
 			fprintf(stderr, "Something went wrong!\n");
 		}
 		// Parent
+
 		if (i < line->ncommands - 1 ) {
 			close(pipefd[1]);
 		}
@@ -249,7 +253,7 @@ void execute_pipeline(const tline * line, char *cmd) {
 		}
 	}
 
-	if (!line->background) { //Todo descomentar esto cuando este implementado el bg
+	if (!line->background) {
 		for (int i = 0; i < line->ncommands; i++) {
 			waitpid(pids[i], NULL, 0);
 		}
@@ -313,16 +317,20 @@ void eval(const tline * line, char * command) {
 		cd(line);
 	} else if (!strcmp(line->commands[0].argv[0], "exit") || !strcmp(line->commands[0].argv[0], "quit")) {
 		if (job_count > 0) {
+			char try;
 			printf("There are running jobs, are you sure? (y/n): ");
 			fflush(stdout);
-			const char try;
 			scanf(" %c", &try);
 			while (getchar() != '\n');
 			if (try == 'n') return;
+			free(jobs);
 		}
 		exit(0);
 	} else if (!strcmp(line->commands[0].argv[0], "fg")) {
-		fg(atoi(line->commands[0].argv[0]));
+		int id;
+
+		line->commands[0].argv[1] == NULL ? id = 0 : atoi(id);
+		fg(id);
 	}
 	else if (!strcmp(line->commands[0].argv[0], "jobs")) {
 		print_jobs();
@@ -350,7 +358,6 @@ int main (void)
 			printf("\n");
 			break;
 		}
-
 		if (buf != NULL) {
 				const tline *line = tokenize(buf);
 

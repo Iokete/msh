@@ -1,4 +1,4 @@
-# Install script for directory: /home/lokete/CLionProjects/msh_
+# Install script for directory: /home/lokete/CLionProjects/msh
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -57,6 +57,6 @@ endif()
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-  file(WRITE "/home/lokete/CLionProjects/msh_/cmake-build-debug/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "/home/lokete/CLionProjects/msh/cmake-build-debug/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
