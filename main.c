@@ -339,22 +339,24 @@ int main (void)
 	signal(SIGQUIT, SIG_IGN);
 	signal(SIGCHLD, sigchld_handler);
 
-	while (1){
+	while (1) {
 		char buf[BUFSIZE] = {0};
 		char path[BUFSIZE] = {0};
 
 		getcwd(path, sizeof(path)); // getcwd() to print it inside the prompt
 		printf("[:" YELLOW " %s " END "] msh> ", path);
 		fflush(stdout);
-		fflush(stdin);
-		if (fgets(buf, BUFSIZE, stdin)) {
-			if (buf != NULL) {
+		if (fgets(buf, BUFSIZE, stdin) == NULL) {
+			printf("\n");
+			break;
+		}
+
+		if (buf != NULL) {
 				const tline *line = tokenize(buf);
 
 				if(line->ncommands == 0) continue;
 
 				eval(line, buf);
-			}
 		}
 	}
 
